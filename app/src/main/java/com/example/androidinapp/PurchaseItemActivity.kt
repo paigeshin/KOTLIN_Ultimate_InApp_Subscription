@@ -1,0 +1,216 @@
+package com.example.androidinapp
+
+import androidx.appcompat.app.AppCompatActivity
+import android.os.Bundle
+import android.view.View
+import android.widget.Toast
+import androidx.recyclerview.widget.DividerItemDecoration
+import androidx.recyclerview.widget.LinearLayoutManager
+import com.android.billingclient.api.*
+import com.example.androidinapp.databinding.ActivityPurchaseItemBinding
+import java.lang.StringBuilder
+import java.util.*
+
+//object BillingClientSetup {
+//
+//    private var instance: BillingClient? = null
+//
+//    fun getInstance(context: Context, purchasesUpdateListener: PurchasesUpdatedListener): BillingClient? {
+//        if(instance == null) {
+//            instance = setupBillingClient(context, purchasesUpdateListener)
+//        }
+//        return instance
+//    }
+//
+//    private fun setupBillingClient(context: Context, purchasesUpdateListener: PurchasesUpdatedListener): BillingClient {
+//        return BillingClient.newBuilder(context)
+//            .enablePendingPurchases()
+//            .setListener(purchasesUpdateListener)
+//            .build()
+//    }
+//
+//}
+
+class PurchaseItemActivity : AppCompatActivity(), PurchasesUpdatedListener {
+
+    private lateinit var binding: ActivityPurchaseItemBinding
+
+    private var mBillingClient: BillingClient? = null
+    private lateinit var mConsumeResponseListener: ConsumeResponseListener
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityPurchaseItemBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        setupBillingClient()
+        setRecyclerView()
+        //Event
+        binding.btnLoadProduct.setOnClickListener {
+
+            if (mBillingClient != null) {
+                if(mBillingClient!!.isReady) {
+                    val skuDetailPrams = SkuDetailsParams.newBuilder()
+                        .setSkusList(Arrays.asList("item1", "item2", "item3"))
+                        .setType(BillingClient.SkuType.INAPP)
+                        .build()
+                    mBillingClient!!.querySkuDetailsAsync(skuDetailPrams, object: SkuDetailsResponseListener {
+                        override fun onSkuDetailsResponse(
+                            billingResult: BillingResult,
+                            skuDetailList: MutableList<SkuDetails>?
+                        ) {
+                            if(billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                                loadProductToRecyclerView(skuDetailList)
+                            } else {
+                                Toast.makeText(this@PurchaseItemActivity, "Error code: " + billingResult.responseCode, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+
+                    })
+                }
+            }
+
+        }
+    }
+
+    private fun loadProductToRecyclerView(skuDetailList: MutableList<SkuDetails>?) {
+        if (mBillingClient != null && skuDetailList != null) {
+            val consumableProductAdapter = ProductAdapter(this, skuDetailList, mBillingClient!!)
+            binding.recyclerProduct.adapter = consumableProductAdapter
+        }
+    }
+
+    private fun setRecyclerView() {
+        binding.recyclerProduct.setHasFixedSize(true)
+        val layoutManager = LinearLayoutManager(this)
+        binding.recyclerProduct.layoutManager = layoutManager
+        binding.recyclerProduct.addItemDecoration(DividerItemDecoration(this, layoutManager.orientation))
+
+    }
+
+    private fun setupBillingClient() {
+        mConsumeResponseListener = object: ConsumeResponseListener {
+            override fun onConsumeResponse(billingResult: BillingResult, p1: String) {
+                if(billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                    Toast.makeText(this@PurchaseItemActivity, "Consume OK!", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        mBillingClient = BillingClientSetup.getInstance(this, this)
+        mBillingClient?.startConnection(object: BillingClientStateListener {
+            override fun onBillingSetupFinished(billingResult: BillingResult) {
+                if(billingResult.responseCode == BillingClient.BillingResponseCode.OK) {
+                    Toast.makeText(this@PurchaseItemActivity, "Succeed to connect billing", Toast.LENGTH_SHORT).show()
+                    //Query
+                    val purchaseList = mBillingClient?.queryPurchases(BillingClient.SkuType.INAPP)?.purchasesList
+                    handleItemAlreadyPurchased(purchaseList)
+                } else {
+                    Toast.makeText(this@PurchaseItemActivity, "Error code: ${billingResult.responseCode}", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            override fun onBillingServiceDisconnected() {
+                    Toast.makeText(this@PurchaseItemActivity, "You are diconnected from Billing Service", Toast.LENGTH_SHORT).show()
+            }
+        })
+    }
+
+    private fun handleItemAlreadyPurchased(purchaseList: List<Purchase>?) {
+        val purchaseItemStringBuilder = StringBuilder(binding.txtPremium.text)
+        if(purchaseList != null) {
+            for(purchase in purchaseList) {
+                if(purchase.sku == "item1") { // Consume Item
+                    val consumeParams = ConsumeParams.newBuilder()
+                        .setPurchaseToken(purchase.purchaseToken)
+                        .build()
+                    mBillingClient?.consumeAsync(consumeParams, mConsumeResponseListener)
+                }
+                purchaseItemStringBuilder
+                    .append("\n" + purchase.sku)
+                    .append("\n")
+            }
+        }
+        binding.txtPremium.text = purchaseItemStringBuilder.toString() //showing purchased item
+        binding.txtPremium.visibility = View.VISIBLE
+    }
+
+    override fun onPurchasesUpdated(billingResult: BillingResult, purchaseList: MutableList<Purchase>?) {
+        if(billingResult.responseCode == BillingClient.BillingResponseCode.OK && purchaseList != null) {
+            handleItemAlreadyPurchased(purchaseList)
+        } else if(billingResult.responseCode == BillingClient.BillingResponseCode.USER_CANCELED){
+            Toast.makeText(this, "User has been cancelled", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Error: ${billingResult.responseCode}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+}
+
+//class ProductAdapter(
+//    private val context: Context,
+//    private val skuDetailList: MutableList<SkuDetails>,
+//    private val billingClient: BillingClient
+//): RecyclerView.Adapter<ProductAdapter.ConsumableProductViewHolder>() {
+//
+//    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ConsumableProductViewHolder {
+//        val layoutInflater = LayoutInflater.from(parent.context)
+//        val binding = ItemProductBinding.inflate(layoutInflater, parent, false)
+//        return ConsumableProductViewHolder(binding)
+//    }
+//
+//    override fun onBindViewHolder(holder: ConsumableProductViewHolder, position: Int) {
+//        val skuDetails = skuDetailList[position]
+//        holder.bind(skuDetails)
+//    }
+//
+//    override fun getItemCount(): Int = skuDetailList.size
+//
+//    inner class ConsumableProductViewHolder(
+//        private val binding: ItemProductBinding
+//    ):RecyclerView.ViewHolder(binding.root) {
+//
+//        fun bind(skuDetail: SkuDetails) {
+//            binding.txtProductName.text = skuDetail.title
+//            binding.txtDecsription.text = skuDetail.description
+//            binding.txtPrice.text = skuDetail.price
+//
+//            itemView.setOnClickListener {
+//                //Launch Billing Flow
+//                val billingFlowParams = BillingFlowParams.newBuilder()
+//                    .setSkuDetails(skuDetail)
+//                    .build()
+//                val responseCode = billingClient.launchBillingFlow(context as Activity, billingFlowParams).responseCode
+//                when(responseCode) {
+//                    BillingClient.BillingResponseCode.BILLING_UNAVAILABLE -> {
+//                        Toast.makeText(context, "BILLING_UNAVAILABLE", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.DEVELOPER_ERROR -> {
+//                        Toast.makeText(context, "DEVELOPER_ERROR", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.FEATURE_NOT_SUPPORTED -> {
+//                        Toast.makeText(context, "FEATURE_NOT_SUPPORTED", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED -> {
+//                        Toast.makeText(context, "ITEM_ALREADY_OWNED", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.ITEM_UNAVAILABLE -> {
+//                        Toast.makeText(context, "ITEM_UNAVAILABLE", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.ITEM_NOT_OWNED -> {
+//                        Toast.makeText(context, "ITEM_NOT_OWNED", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.SERVICE_DISCONNECTED -> {
+//                        Toast.makeText(context, "SERVICE_DISCONNECTED", Toast.LENGTH_SHORT).show()
+//                    }
+//                    BillingClient.BillingResponseCode.SERVICE_TIMEOUT -> {
+//                        Toast.makeText(context, "SERVICE_TIMEOUT", Toast.LENGTH_SHORT).show()
+//                    }
+//                    else -> {
+//                        //do nothing...
+//                    }
+//                }
+//            }
+//
+//        }
+//    }
+//
+//}
